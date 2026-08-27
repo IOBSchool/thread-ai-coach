@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Session as AuthSession, User } from "@supabase/supabase-js";
+import type { User } from "@supabase/supabase-js";
 import { getSupabase } from "@/lib/supabase";
 
 type Attachment = { name: string; mime: string; data: string };
@@ -13,7 +13,7 @@ type Session = {
   updated_at: string;
   messages: Msg[];
 };
-type View = "chat" | "mypage" | "viewing";
+type Mode = "gentle" | "direct";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -32,10 +32,31 @@ function leanMessages(messages: Msg[]): Msg[] {
   }));
 }
 
+function groupSessions(sessions: Session[]) {
+  const now = Date.now();
+  const day = 86400000;
+  const groups: { label: string; items: Session[] }[] = [
+    { label: "今日", items: [] },
+    { label: "過去7日間", items: [] },
+    { label: "それ以前", items: [] },
+  ];
+  for (const s of sessions) {
+    const diff = now - new Date(s.updated_at).getTime();
+    if (diff < day) groups[0].items.push(s);
+    else if (diff < day * 7) groups[1].items.push(s);
+    else groups[2].items.push(s);
+  }
+  return groups.filter((g) => g.items.length > 0);
+}
+
+const MODE_INFO: Record<Mode, { label: string; dot: string; desc: string }> = {
+  gentle: { label: "甘口", dot: "var(--rose)", desc: "そっと寄り添ってほしいとき" },
+  direct: { label: "辛口", dot: "var(--accent)", desc: "率直に映してほしいとき" },
+};
+
 export default function Page() {
   const supabase = getSupabase();
 
-  // auth
   const [authLoading, setAuthLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
@@ -43,23 +64,36 @@ export default function Page() {
   const [emailSent, setEmailSent] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
 
-  const [view, setView] = useState<View>("chat");
   const [sessions, setSessions] = useState<Session[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
-  const [viewingId, setViewingId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [closing, setClosing] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachErr, setAttachErr] = useState("");
+
+  const [mode, setMode] = useState<Mode>("gentle");
+  const [modeMenuOpen, setModeMenuOpen] = useState(false);
+
+  const [recording, setRecording] = useState(false);
+  const speechSupportedRef = useRef(false);
+  const recognitionRef = useRef<any>(null);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  const MAX_BYTES = 4 * 1024 * 1024;
+  const MAX_BYTES = 8 * 1024 * 1024;
   const ALLOWED = [
     "application/pdf",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/vnd.ms-excel",
+    "text/plain",
+    "text/csv",
     "image/jpeg",
     "image/png",
     "image/webp",
@@ -86,16 +120,16 @@ export default function Page() {
     let totalBytes = nextList.reduce((n, a) => n + (a.data.length * 3) / 4, 0);
     for (const f of Array.from(files)) {
       if (!ALLOWED.includes(f.type)) {
-        setAttachErr(`${f.name} は対応していない形式です（PDF/画像のみ）`);
+        setAttachErr(`${f.name} は対応していない形式です`);
         continue;
       }
       if (f.size > MAX_BYTES) {
-        setAttachErr(`${f.name} はサイズが大きすぎます（4MBまで）`);
+        setAttachErr(`${f.name} はサイズが大きすぎます（8MBまで）`);
         continue;
       }
       totalBytes += f.size;
       if (totalBytes > MAX_BYTES) {
-        setAttachErr("合計サイズが4MBを超えました");
+        setAttachErr("合計サイズが8MBを超えました");
         break;
       }
       const data = await fileToBase64(f);
@@ -115,15 +149,11 @@ export default function Page() {
       setUser(data.session?.user ?? null);
       setAuthLoading(false);
     });
-
     const { data: sub } = supabase.auth.onAuthStateChange((_evt, session) => {
       setUser(session?.user ?? null);
       setAuthLoading(false);
     });
-
-    return () => {
-      sub.subscription.unsubscribe();
-    };
+    return () => sub.subscription.unsubscribe();
   }, [supabase]);
 
   // ログイン後にセッション一覧を取得
@@ -145,16 +175,67 @@ export default function Page() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streaming]);
 
+  // 甘口/辛口モードの記憶
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("tapestry-coach-mode") : null;
+    if (saved === "gentle" || saved === "direct") setMode(saved);
+  }, []);
+  const chooseMode = (m: Mode) => {
+    setMode(m);
+    localStorage.setItem("tapestry-coach-mode", m);
+    setModeMenuOpen(false);
+  };
+
+  // 音声入力対応チェック
+  useEffect(() => {
+    speechSupportedRef.current =
+      typeof window !== "undefined" &&
+      (("SpeechRecognition" in window) || ("webkitSpeechRecognition" in window));
+  }, []);
+
+  const toggleRecording = () => {
+    if (recording) {
+      recognitionRef.current?.stop();
+      return;
+    }
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "ja-JP";
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.onresult = (e: any) => {
+      let text = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) text += e.results[i][0].transcript;
+      }
+      if (text) setInput((prev) => (prev ? prev + text : text));
+    };
+    rec.onend = () => setRecording(false);
+    rec.onerror = () => setRecording(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setRecording(true);
+  };
+
+  // 入力欄：文字量に合わせて高さを自動で伸ばす
+  const autoGrow = () => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = Math.min(el.scrollHeight, 260) + "px";
+  };
+  useEffect(() => {
+    autoGrow();
+  }, [input]);
+
   if (authLoading) {
     return (
-      <>
-        <div className="thread-line" />
-        <div className="gate">
-          <div className="gate-card">
-            <div className="logo-t">T</div>
-          </div>
+      <div className="gate">
+        <div className="gate-card">
+          <div className="logo-t">T</div>
         </div>
-      </>
+      </div>
     );
   }
 
@@ -182,75 +263,65 @@ export default function Page() {
       setEmailSent(true);
     };
     return (
-      <>
-        <div className="thread-line" />
-        <div className="gate">
-          <div className="gate-card">
-            <div className="logo-t">T</div>
-            <div className="eyebrow">Tapestry Circle専用</div>
-            <div className="title-jp">THE THREAD</div>
-            <div className="subtitle">
-              呼吸を整えながら、
-              <br />
-              自己と再びつながるAIコーチ
-            </div>
-            {emailSent ? (
-              <div style={{ color: "var(--ink-mid)", fontSize: 13, lineHeight: 2, marginTop: 24 }}>
-                <strong style={{ color: "var(--thread)" }}>{email}</strong>
-                <br />
-                宛にひらくためのリンクをお送りしました。
-                <br />
-                <br />
-                メール内のリンクをクリックすると、
-                <br />
-                この場にもどってひらきます。
-              </div>
-            ) : (
-              <>
-                <input
-                  type="email"
-                  value={email}
-                  placeholder="メールアドレス"
-                  autoComplete="email"
-                  onChange={(e) => {
-                    setEmail(e.target.value);
-                    setEmailErr("");
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && submit()}
-                  autoFocus
-                />
-                <div className="gate-error">{emailErr}</div>
-                <button onClick={submit} disabled={sendingEmail}>
-                  {sendingEmail ? "送信中…" : "ひらく"}
-                </button>
-                <div
-                  style={{
-                    marginTop: 18,
-                    fontSize: 11,
-                    color: "var(--ink-soft)",
-                    letterSpacing: "0.02em",
-                    lineHeight: 1.9,
-                    wordBreak: "keep-all",
-                  }}
-                >
-                  初回だけメール認証。以後はこの端末なら
-                  <br />
-                  開きっぱなしで使えます。対話は1年間保管されます。
-                </div>
-              </>
-            )}
+      <div className="gate">
+        <div className="gate-card">
+          <div className="logo-t">T</div>
+          <div className="eyebrow">Tapestry Circle専用</div>
+          <div className="title-jp">THE THREAD</div>
+          <div className="subtitle">
+            呼吸を整えながら、
+            <br />
+            自己と再びつながるAIコーチ
           </div>
+          {emailSent ? (
+            <div style={{ color: "var(--sub)", fontSize: 13, lineHeight: 2 }}>
+              <strong style={{ color: "var(--accent)" }}>{email}</strong>
+              <br />
+              宛にひらくためのリンクをお送りしました。
+              <br />
+              <br />
+              メール内のリンクをクリックすると、
+              <br />
+              この場にもどってひらきます。
+            </div>
+          ) : (
+            <>
+              <input
+                type="email"
+                value={email}
+                placeholder="メールアドレス"
+                autoComplete="email"
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailErr("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                autoFocus
+              />
+              <div className="gate-error">{emailErr}</div>
+              <button onClick={submit} disabled={sendingEmail}>
+                {sendingEmail ? "送信中…" : "ひらく"}
+              </button>
+              <div
+                style={{
+                  marginTop: 18,
+                  fontSize: 11,
+                  color: "var(--sub)",
+                  letterSpacing: "0.02em",
+                  lineHeight: 1.9,
+                  wordBreak: "keep-all",
+                }}
+              >
+                初回だけメール認証。以後はこの端末なら
+                <br />
+                開きっぱなしで使えます。対話は1年間保管されます。
+              </div>
+            </>
+          )}
         </div>
-      </>
+      </div>
     );
   }
-
-  const ensureSession = (): string => {
-    if (currentId) return currentId;
-    const id = newId();
-    setCurrentId(id);
-    return id;
-  };
 
   const persistSession = async (sessionId: string, msgs: Msg[], title?: string) => {
     if (!user) return;
@@ -261,28 +332,42 @@ export default function Page() {
       if (title) patch.title = title;
       const { error } = await supabase.from("sessions").update(patch).eq("id", sessionId);
       if (!error) {
-        setSessions((prev) =>
-          prev.map((s) => (s.id === sessionId ? { ...s, ...patch, messages: lean } : s)),
-        );
+        setSessions((prev) => prev.map((s) => (s.id === sessionId ? { ...s, ...patch, messages: lean } : s)));
       }
     } else {
-      const row = {
-        id: sessionId,
-        user_id: user.id,
-        title: title ?? "（タイトル未設定）",
-        messages: lean,
-      };
+      const row = { id: sessionId, user_id: user.id, title: title ?? "（タイトル未設定）", messages: lean };
       const { data, error } = await supabase.from("sessions").insert(row).select().single();
-      if (!error && data) {
-        setSessions((prev) => [data as Session, ...prev]);
-      }
+      if (!error && data) setSessions((prev) => [data as Session, ...prev]);
     }
+  };
+
+  const maybeGenerateTitle = async (sessionId: string, msgs: Msg[]) => {
+    // 最初の応答が返った直後に一度だけタイトルを自動生成する
+    if (msgs.length !== 2) return;
+    try {
+      const res = await fetch("/api/title", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messages: leanMessages(msgs) }),
+      });
+      if (!res.ok) return;
+      const j = await res.json().catch(() => ({}));
+      if (j?.title) await persistSession(sessionId, msgs, String(j.title).slice(0, 30));
+    } catch {}
+  };
+
+  const ensureSession = (): string => {
+    if (currentId) return currentId;
+    const id = newId();
+    setCurrentId(id);
+    return id;
   };
 
   const send = async () => {
     const text = input.trim();
     if (streaming) return;
     if (!text && attachments.length === 0) return;
+    if (recording) recognitionRef.current?.stop();
     const sessionId = ensureSession();
     const userMsg: Msg = {
       role: "user",
@@ -296,15 +381,15 @@ export default function Page() {
     setAttachErr("");
     setStreaming(true);
     setMessages((m) => [...m, { role: "assistant", content: "" }]);
+    requestAnimationFrame(autoGrow);
 
-    // ユーザー発話時点で先に保存（途中で離脱しても残る）
     persistSession(sessionId, afterUser).catch(() => {});
 
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: afterUser }),
+        body: JSON.stringify({ messages: afterUser, mode }),
       });
       if (!res.ok || !res.body) {
         const err = await res.text().catch(() => "");
@@ -325,7 +410,8 @@ export default function Page() {
       }
       const finalMsgs: Msg[] = [...afterUser, { role: "assistant", content: acc }];
       persistSession(sessionId, finalMsgs).catch(() => {});
-    } catch (e: any) {
+      maybeGenerateTitle(sessionId, finalMsgs);
+    } catch {
       const fallback: Msg = {
         role: "assistant",
         content: "少し通信が途切れたようです。\nもう一度、やさしく送ってみてください。",
@@ -341,45 +427,19 @@ export default function Page() {
     }
   };
 
-  const closeSession = async () => {
-    if (!currentId || messages.length === 0) {
-      setMessages([]);
-      setCurrentId(null);
-      return;
-    }
-    if (!confirm("この対話を一度とじて、マイページに保存しますか？")) return;
-    setClosing(true);
-    let title = "";
-    try {
-      const res = await fetch("/api/title", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: leanMessages(messages) }),
-      });
-      if (res.ok) {
-        const j = await res.json().catch(() => ({}));
-        if (j?.title) title = String(j.title).slice(0, 30);
-      }
-    } catch {}
-    if (!title) {
-      const firstUser = messages.find((m) => m.role === "user");
-      title = firstUser?.content.slice(0, 20) || "対話の記録";
-    }
-    await persistSession(currentId, messages, title);
-    setMessages([]);
-    setCurrentId(null);
-    setClosing(false);
-  };
-
   const startNewSession = () => {
     setMessages([]);
     setCurrentId(null);
-    setView("chat");
+    setInput("");
+    setAttachments([]);
+    setSidebarOpen(false);
+    requestAnimationFrame(autoGrow);
   };
 
-  const openSession = (id: string) => {
-    setViewingId(id);
-    setView("viewing");
+  const openSession = (s: Session) => {
+    setMessages(s.messages);
+    setCurrentId(s.id);
+    setSidebarOpen(false);
   };
 
   const deleteSession = async (id: string) => {
@@ -387,229 +447,221 @@ export default function Page() {
     const { error } = await supabase.from("sessions").delete().eq("id", id);
     if (error) return;
     setSessions((prev) => prev.filter((s) => s.id !== id));
-    if (viewingId === id) {
-      setViewingId(null);
-      setView("mypage");
-    }
+    if (currentId === id) startNewSession();
   };
 
   const signOut = async () => {
-    if (!confirm("ログアウトしますか？")) return;
     await supabase.auth.signOut();
     setMessages([]);
     setCurrentId(null);
     setSessions([]);
-    setView("chat");
   };
 
-  if (view === "mypage") {
-    return (
-      <>
-        <div className="thread-line" />
-        <div className="header">
-          <div className="header-title">Tapestry Circle用 · マイページ</div>
-          <div className="countdown" style={{ marginBottom: 4, marginTop: 6 }}>
-            {user.email}
-          </div>
-        </div>
-        <div className="page-wrap">
-          <div className="page-actions">
-            <button className="nav-btn" onClick={() => setView("chat")}>
-              ← 対話にもどる
-            </button>
-            <button className="nav-btn" onClick={startNewSession}>
-              ＋ 新しい対話をはじめる
-            </button>
-            <button className="nav-btn" onClick={signOut}>
-              ログアウト
-            </button>
-          </div>
-          <div className="mypage-title">これまでの対話</div>
-          {sessions.length === 0 ? (
-            <div className="empty">まだ記録はありません。</div>
-          ) : (
-            <ul className="session-list">
-              {sessions.map((s) => (
-                <li key={s.id} className="session-item">
-                  <button className="session-link" onClick={() => openSession(s.id)}>
-                    <div className="session-title">{s.title}</div>
-                    <div className="session-meta">
-                      {formatDate(s.updated_at)} · {s.messages.length}通
-                    </div>
-                  </button>
-                  <button
-                    className="session-del"
-                    onClick={() => deleteSession(s.id)}
-                    aria-label="削除"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      </>
-    );
-  }
+  const filteredSessions = sessions.filter((s) =>
+    s.title.toLowerCase().includes(search.toLowerCase()),
+  );
+  const groups = groupSessions(filteredSessions);
+  const currentTitle = sessions.find((s) => s.id === currentId)?.title;
 
-  if (view === "viewing") {
-    const s = sessions.find((x) => x.id === viewingId);
-    return (
-      <>
-        <div className="thread-line" />
-        <div className="header">
-          <div className="header-title">Tapestry Circle用 · 記録</div>
-          <div className="countdown">{s ? formatDate(s.updated_at) : ""}</div>
-        </div>
-        <div className="chat-wrap">
-          <div className="page-actions" style={{ marginBottom: 24 }}>
-            <button className="nav-btn" onClick={() => setView("mypage")}>
-              ← マイページにもどる
-            </button>
-            {s && (
-              <button
-                className="nav-btn"
-                onClick={() => {
-                  setMessages(s.messages);
-                  setCurrentId(s.id);
-                  setView("chat");
-                }}
-              >
-                この対話を続ける →
-              </button>
-            )}
-          </div>
-          {!s ? (
-            <div className="empty">記録が見つかりませんでした。</div>
+  return (
+    <div className="app-shell">
+      <div className={`sidebar-overlay${sidebarOpen ? " open" : ""}`} onClick={() => setSidebarOpen(false)} />
+      <div className={`sidebar${sidebarOpen ? " open" : ""}`}>
+        <div className="threads-band" />
+        <div className="sidebar-brand">Tapestry Circle</div>
+        <div className="sidebar-sub">AI コーチ</div>
+        <button className="newchat-btn" onClick={startNewSession}>
+          ＋ 新しい対話
+        </button>
+        {sessions.length > 3 && (
+          <input
+            className="sidebar-search"
+            placeholder="対話をさがす"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
+        <div className="sidebar-sessions">
+          {groups.length === 0 ? (
+            <div className="sidebar-empty">まだ記録はありません。</div>
           ) : (
-            <>
-              <div className="viewing-title">{s.title}</div>
-              <div className="messages">
-                {s.messages.map((m, i) => (
-                  <div key={i} className={`msg ${m.role === "user" ? "user" : "ai"}`}>
-                    {m.attachments && m.attachments.length > 0 && (
-                      <div className="msg-files">
-                        {m.attachments.map((a, j) => (
-                          <span key={j} className="file-chip saved">
-                            📎 {a.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {m.content}
+            groups.map((g) => (
+              <div key={g.label}>
+                <div className="grouplabel">{g.label}</div>
+                {g.items.map((s) => (
+                  <div
+                    key={s.id}
+                    className={`session-row${s.id === currentId ? " active" : ""}`}
+                    onClick={() => openSession(s)}
+                  >
+                    <span className="session-row-title">{s.title}</span>
+                    <span
+                      className="session-row-del"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSession(s.id);
+                      }}
+                    >
+                      ×
+                    </span>
                   </div>
                 ))}
               </div>
-            </>
+            ))
           )}
         </div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      <div className="thread-line" />
-      <div className="header">
-        <div className="header-title">Tapestry Circle用 · THE THREAD AI Coach</div>
-        <div className="header-nav">
-          <button className="nav-btn" onClick={() => setView("mypage")}>
-            マイページ
+        <div className="sidebar-foot">
+          <span className="sidebar-foot-email">{user.email}</span>
+          <button className="sidebar-foot-signout" onClick={signOut}>
+            サインアウト
           </button>
-          {messages.length > 0 && (
-            <button className="nav-btn" onClick={closeSession} disabled={closing}>
-              {closing ? "保存しています…" : "対話をとじて保存"}
-            </button>
-          )}
         </div>
       </div>
 
-      <div className="chat-wrap">
-        <div className="messages">
-          {messages.length === 0 && (
-            <div className="msg ai" style={{ textAlign: "center", opacity: 0.7 }}>
-              今、心にあることを、
-              <br />
-              そのまま置いてみてください。
-            </div>
-          )}
-          {messages.map((m, i) => (
-            <div key={i} className={`msg ${m.role === "user" ? "user" : "ai"}`}>
-              {m.attachments && m.attachments.length > 0 && (
-                <div className="msg-files">
-                  {m.attachments.map((a, j) => (
-                    <span key={j} className="file-chip saved">
-                      📎 {a.name}
+      <div className="main">
+        <div className="main-header">
+          <span className="hamburger" onClick={() => setSidebarOpen(true)}>
+            ☰
+          </span>
+          <div>
+            <div className="main-header-eyebrow">TAPESTRY CIRCLE</div>
+            <div className="main-header-title">{currentTitle || "新しい対話"}</div>
+          </div>
+        </div>
+
+        <div className="messages-scroll">
+          <div className="messages">
+            {messages.length === 0 && (
+              <div className="empty-hero">
+                今、心にあることを、
+                <br />
+                そのまま置いてみてください。
+              </div>
+            )}
+            {messages.map((m, i) => (
+              <div key={i} className={`msg ${m.role === "user" ? "user" : "ai"}`}>
+                {m.attachments && m.attachments.length > 0 && (
+                  <div className="msg-files">
+                    {m.attachments.map((a, j) => (
+                      <span key={j} className="file-chip saved">
+                        📎 {a.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {m.content ||
+                  (streaming && i === messages.length - 1 ? (
+                    <span className="thinking">
+                      <span className="typing" /> 静かに、言葉を紡いでいます…
                     </span>
+                  ) : (
+                    ""
                   ))}
-                </div>
-              )}
-              {m.content ||
-                (streaming && i === messages.length - 1 ? (
-                  <span className="thinking">
-                    <span className="typing" /> 静かに、言葉を紡いでいます…
-                  </span>
-                ) : (
-                  ""
-                ))}
-            </div>
-          ))}
-          <div ref={bottomRef} />
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
         </div>
-      </div>
 
-      <div className="composer">
-        {attachments.length > 0 && (
-          <div className="attach-preview">
-            {attachments.map((a, i) => (
-              <span key={i} className="file-chip">
-                📎 {a.name}
+        <div className="composer-wrap">
+          {attachments.length > 0 && (
+            <div className="attach-preview">
+              {attachments.map((a, i) => (
+                <span key={i} className="file-chip">
+                  📎 {a.name}
+                  <button type="button" onClick={() => removeAttachment(i)} aria-label="添付を外す">
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {attachErr && <div className="attach-err">{attachErr}</div>}
+
+          <div className="composer-box">
+            <textarea
+              ref={textareaRef}
+              className="composer-textarea"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  if (!streaming && (input.trim() || attachments.length > 0)) send();
+                }
+              }}
+              placeholder="ここに、そっと置いてみてください…（PDF・Word・Excel・写真も置けます）"
+              rows={1}
+              autoFocus
+            />
+            <div className="composer-controls">
+              <div className="composer-controls-left">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,image/*"
+                  multiple
+                  style={{ display: "none" }}
+                  onChange={(e) => onPickFiles(e.target.files)}
+                />
                 <button
                   type="button"
-                  onClick={() => removeAttachment(i)}
-                  aria-label="添付を外す"
+                  className="icon-btn"
+                  onClick={() => fileRef.current?.click()}
+                  title="資料を添付（PDF・Word・Excel・写真など）"
+                  disabled={streaming}
                 >
-                  ×
+                  ＋
                 </button>
-              </span>
-            ))}
+                {speechSupportedRef.current && (
+                  <button
+                    type="button"
+                    className={`icon-btn${recording ? " recording" : ""}`}
+                    onClick={toggleRecording}
+                    title={recording ? "録音を止める" : "話しかけて入力する"}
+                    disabled={streaming}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="9" y="2" width="6" height="12" rx="3" />
+                      <path d="M5 10a7 7 0 0 0 14 0" />
+                      <line x1="12" y1="19" x2="12" y2="22" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+              <div style={{ position: "relative" }}>
+                <button
+                  type="button"
+                  className="mode-pill"
+                  onClick={() => setModeMenuOpen((v) => !v)}
+                >
+                  <span className="mode-pill-dot" style={{ background: MODE_INFO[mode].dot }} />
+                  {MODE_INFO[mode].label}
+                </button>
+                {modeMenuOpen && (
+                  <>
+                    <div
+                      style={{ position: "fixed", inset: 0, zIndex: 15 }}
+                      onClick={() => setModeMenuOpen(false)}
+                    />
+                    <div className="mode-menu">
+                      {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
+                        <button key={m} className="mode-menu-item" onClick={() => chooseMode(m)}>
+                          <div className="mode-menu-item-label">
+                            <span className="mode-pill-dot" style={{ background: MODE_INFO[m].dot }} />
+                            {MODE_INFO[m].label}
+                          </div>
+                          <div className="mode-menu-item-desc">{MODE_INFO[m].desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
           </div>
-        )}
-        {attachErr && <div className="attach-err">{attachErr}</div>}
-        <div className="composer-inner">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,image/*"
-            multiple
-            style={{ display: "none" }}
-            onChange={(e) => onPickFiles(e.target.files)}
-          />
-          <button
-            type="button"
-            className="attach-btn"
-            onClick={() => fileRef.current?.click()}
-            title="PDF・画像を添付"
-            disabled={streaming}
-          >
-            ＋ 添付
-          </button>
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                if (!streaming && (input.trim() || attachments.length > 0)) send();
-              }
-            }}
-            placeholder="ここに、そっと置いてみてください…&#10;Shift + Enter で改行"
-            rows={4}
-            autoFocus
-          />
         </div>
       </div>
-    </>
+    </div>
   );
 }
