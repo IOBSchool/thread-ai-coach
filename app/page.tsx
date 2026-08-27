@@ -69,6 +69,9 @@ export default function Page() {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [editingHeader, setEditingHeader] = useState(false);
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -342,6 +345,15 @@ export default function Page() {
     }
   };
 
+  const renameSession = async (id: string, title: string) => {
+    const t = title.trim().slice(0, 40);
+    if (!t) return;
+    const { error } = await supabase.from("sessions").update({ title: t }).eq("id", id);
+    if (!error) {
+      setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title: t } : s)));
+    }
+  };
+
   const maybeGenerateTitle = async (sessionId: string, msgs: Msg[]) => {
     // 最初の応答が返った直後に一度だけタイトルを自動生成する
     if (msgs.length !== 2) return;
@@ -443,6 +455,24 @@ export default function Page() {
     setSidebarOpen(false);
   };
 
+  const startEditTitle = (id: string, current: string) => {
+    setEditingId(id);
+    setEditingValue(current);
+  };
+  const commitEditTitle = () => {
+    if (editingId) renameSession(editingId, editingValue);
+    setEditingId(null);
+  };
+
+  const startEditHeaderTitle = (current: string) => {
+    setEditingHeader(true);
+    setEditingValue(current);
+  };
+  const commitEditHeaderTitle = () => {
+    if (currentId) renameSession(currentId, editingValue);
+    setEditingHeader(false);
+  };
+
   const deleteSession = async (id: string) => {
     if (!confirm("この記録を削除しますか？")) return;
     const { error } = await supabase.from("sessions").delete().eq("id", id);
@@ -493,9 +523,37 @@ export default function Page() {
                   <div
                     key={s.id}
                     className={`session-row${s.id === currentId ? " active" : ""}`}
-                    onClick={() => openSession(s)}
+                    onClick={() => (editingId === s.id ? undefined : openSession(s))}
                   >
-                    <span className="session-row-title">{s.title}</span>
+                    {editingId === s.id ? (
+                      <input
+                        className="session-row-input"
+                        value={editingValue}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => setEditingValue(e.target.value)}
+                        onBlur={commitEditTitle}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") commitEditTitle();
+                          if (e.key === "Escape") setEditingId(null);
+                        }}
+                      />
+                    ) : (
+                      <span className="session-row-title">{s.title}</span>
+                    )}
+                    <span
+                      className="session-row-edit"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startEditTitle(s.id, s.title);
+                      }}
+                      title="タイトルを変更"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                    </span>
                     <span
                       className="session-row-del"
                       onClick={(e) => {
@@ -524,9 +582,35 @@ export default function Page() {
           <span className="hamburger" onClick={() => setSidebarOpen(true)}>
             ☰
           </span>
-          <div>
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div className="main-header-eyebrow">TAPESTRY CIRCLE</div>
-            <div className="main-header-title">{currentTitle || "新しい対話"}</div>
+            {editingHeader ? (
+              <input
+                className="main-header-title-input"
+                value={editingValue}
+                autoFocus
+                onChange={(e) => setEditingValue(e.target.value)}
+                onBlur={commitEditHeaderTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") commitEditHeaderTitle();
+                  if (e.key === "Escape") setEditingHeader(false);
+                }}
+              />
+            ) : (
+              <div
+                className={`main-header-title${currentTitle ? " editable" : ""}`}
+                onClick={() => currentTitle && startEditHeaderTitle(currentTitle)}
+                title={currentTitle ? "クリックしてタイトルを変更" : undefined}
+              >
+                {currentTitle || "新しい対話"}
+                {currentTitle && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: 7, flexShrink: 0, opacity: 0.7 }}>
+                    <path d="M12 20h9" />
+                    <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
