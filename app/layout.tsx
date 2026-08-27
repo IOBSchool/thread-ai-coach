@@ -4,6 +4,19 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Tapestry Circle · AI コーチ",
   description: "呼吸を整えながら、自己と再びつながるAIコーチ",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "AIコーチ",
+  },
+  icons: {
+    apple: "/apple-touch-icon.png",
+  },
+};
+
+export const viewport = {
+  themeColor: "#191428",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

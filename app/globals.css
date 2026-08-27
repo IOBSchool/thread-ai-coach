@@ -16,6 +16,40 @@
   --deep2: #2a2140;
   --deep-ink: #f4eedf;
   --deep-sub: #c9bfa0;
+  --modal-overlay: rgba(25, 20, 15, 0.4);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1c1712;
+    --bg-soft: #241e17;
+    --ink: #ece3d5;
+    --sub: #a89987;
+    --line: rgba(255, 255, 255, 0.09);
+    --card: #241e17;
+    --accent: #dba05a;
+    --accent-soft: rgba(219, 160, 90, 0.16);
+    --deep1: #0d0b14;
+    --deep2: #16111f;
+    --modal-overlay: rgba(0, 0, 0, 0.6);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #1c1712;
+  --bg-soft: #241e17;
+  --ink: #ece3d5;
+  --sub: #a89987;
+  --line: rgba(255, 255, 255, 0.09);
+  --card: #241e17;
+  --accent: #dba05a;
+  --accent-soft: rgba(219, 160, 90, 0.16);
+  --deep1: #0d0b14;
+  --deep2: #16111f;
+  --modal-overlay: rgba(0, 0, 0, 0.6);
+  color-scheme: dark;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -258,6 +292,13 @@ input, textarea { font-family: inherit; }
   flex-shrink: 0;
 }
 .sidebar-foot-signout:hover { color: var(--accent); }
+.theme-toggle {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  color: var(--sub);
+}
+.theme-toggle:hover { background: var(--bg-soft); color: var(--accent); }
 
 .sidebar-overlay { display: none; }
 
@@ -330,6 +371,21 @@ input, textarea { font-family: inherit; }
   color: var(--ink);
 }
 .msg.ai { color: var(--ink); position: relative; z-index: 1; }
+.speak-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  margin-left: 8px;
+  vertical-align: -4px;
+  border-radius: 50%;
+  color: var(--sub);
+  opacity: 0;
+  transition: opacity 0.2s, background 0.2s, color 0.2s;
+}
+.msg.ai:hover .speak-btn { opacity: 0.6; }
+.speak-btn:hover { opacity: 1 !important; background: var(--bg-soft); color: var(--accent); }
+.speak-btn.speaking { opacity: 1; color: var(--accent); }
 .typing {
   display: inline-block;
   width: 7px; height: 7px;
@@ -535,3 +591,53 @@ input, textarea { font-family: inherit; }
   .composer-wrap { padding: 8px 16px 18px; }
   .attach-preview, .attach-err { padding: 0 16px; }
 }
+
+/* ─── 確認モーダル（OS標準confirmの代わり） ─── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--modal-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 50;
+}
+.modal-card {
+  width: 100%;
+  max-width: 340px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 24px 22px 20px;
+  box-shadow: 0 12px 40px rgba(25, 20, 15, 0.18);
+}
+.modal-title {
+  font-family: "Noto Serif JP", serif;
+  font-size: 15px;
+  color: var(--ink);
+  margin-bottom: 10px;
+  letter-spacing: 0.03em;
+}
+.modal-body {
+  font-size: 12.5px;
+  color: var(--sub);
+  line-height: 1.8;
+  margin-bottom: 22px;
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.modal-btn-cancel {
+  padding: 8px 16px;
+  font-size: 12.5px;
+  color: var(--sub);
+  border-radius: 5px;
+}
+.modal-btn-cancel:hover { background: var(--bg-soft); color: var(--ink); }
+.modal-btn-danger {
+  padding: 8px 16px;
+  font-size: 12.5px;
+  color: #fff;
+  background: #b5482f;
+  border-radius: 5px;
+}
+.modal-btn-danger:hover { opacity: 0.88; }

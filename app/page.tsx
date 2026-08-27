@@ -72,6 +72,10 @@ export default function Page() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingHeader, setEditingHeader] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark" | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null);
+  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
+  const speechSynthSupportedRef = useRef(false);
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -196,6 +200,50 @@ export default function Page() {
       typeof window !== "undefined" &&
       (("SpeechRecognition" in window) || ("webkitSpeechRecognition" in window));
   }, []);
+
+  // 読み上げ対応チェック
+  useEffect(() => {
+    speechSynthSupportedRef.current = typeof window !== "undefined" && "speechSynthesis" in window;
+  }, []);
+
+  const speak = (text: string, idx: number) => {
+    if (!speechSynthSupportedRef.current) return;
+    window.speechSynthesis.cancel();
+    if (speakingIndex === idx) {
+      setSpeakingIndex(null);
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "ja-JP";
+    u.onend = () => setSpeakingIndex(null);
+    u.onerror = () => setSpeakingIndex(null);
+    window.speechSynthesis.speak(u);
+    setSpeakingIndex(idx);
+  };
+
+  // ダークモードの記憶（未設定ならOSの設定に従う）
+  const [systemPrefersDark, setSystemPrefersDark] = useState(false);
+  useEffect(() => {
+    const saved = typeof window !== "undefined" ? localStorage.getItem("tapestry-coach-theme") : null;
+    if (saved === "light" || saved === "dark") setTheme(saved);
+    if (typeof window !== "undefined") {
+      const mq = window.matchMedia("(prefers-color-scheme: dark)");
+      setSystemPrefersDark(mq.matches);
+      const onChange = () => setSystemPrefersDark(mq.matches);
+      mq.addEventListener("change", onChange);
+      return () => mq.removeEventListener("change", onChange);
+    }
+  }, []);
+  useEffect(() => {
+    if (theme) document.documentElement.setAttribute("data-theme", theme);
+    else document.documentElement.removeAttribute("data-theme");
+  }, [theme]);
+  const resolvedTheme: "light" | "dark" = theme || (systemPrefersDark ? "dark" : "light");
+  const toggleTheme = () => {
+    const next = resolvedTheme === "dark" ? "light" : "dark";
+    setTheme(next);
+    localStorage.setItem("tapestry-coach-theme", next);
+  };
 
   const toggleRecording = () => {
     if (recording) {
@@ -473,12 +521,32 @@ export default function Page() {
     setEditingHeader(false);
   };
 
-  const deleteSession = async (id: string) => {
-    if (!confirm("この記録を削除しますか？")) return;
+  const requestDelete = (id: string, title: string) => setConfirmDelete({ id, title });
+
+  const confirmDeleteNow = async () => {
+    if (!confirmDelete) return;
+    const id = confirmDelete.id;
+    setConfirmDelete(null);
     const { error } = await supabase.from("sessions").delete().eq("id", id);
     if (error) return;
     setSessions((prev) => prev.filter((s) => s.id !== id));
     if (currentId === id) startNewSession();
+  };
+
+  const downloadSession = (s: Session) => {
+    const lines = [s.title, `保存日: ${formatDate(s.updated_at)}`, ""];
+    for (const m of s.messages) {
+      lines.push(m.role === "user" ? "【あなた】" : "【コーチ】");
+      lines.push(m.content);
+      lines.push("");
+    }
+    const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${(s.title || "対話").slice(0, 40)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const signOut = async () => {
@@ -488,9 +556,12 @@ export default function Page() {
     setSessions([]);
   };
 
-  const filteredSessions = sessions.filter((s) =>
-    s.title.toLowerCase().includes(search.toLowerCase()),
-  );
+  const filteredSessions = sessions.filter((s) => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    if (s.title.toLowerCase().includes(q)) return true;
+    return s.messages.some((m) => m.content.toLowerCase().includes(q));
+  });
   const groups = groupSessions(filteredSessions);
   const currentTitle = sessions.find((s) => s.id === currentId)?.title;
 
@@ -555,10 +626,24 @@ export default function Page() {
                       </svg>
                     </span>
                     <span
+                      className="session-row-edit"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        downloadSession(s);
+                      }}
+                      title="この対話をダウンロード"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                    </span>
+                    <span
                       className="session-row-del"
                       onClick={(e) => {
                         e.stopPropagation();
-                        deleteSession(s.id);
+                        requestDelete(s.id, s.title);
                       }}
                     >
                       ×
@@ -571,9 +656,30 @@ export default function Page() {
         </div>
         <div className="sidebar-foot">
           <span className="sidebar-foot-email">{user.email}</span>
-          <button className="sidebar-foot-signout" onClick={signOut}>
-            サインアウト
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            <button className="theme-toggle" onClick={toggleTheme} title="明るさを切り替え" aria-label="明るさを切り替え">
+              {resolvedTheme === "dark" ? (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="5" />
+                  <line x1="12" y1="1" x2="12" y2="3" />
+                  <line x1="12" y1="21" x2="12" y2="23" />
+                  <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                  <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                  <line x1="1" y1="12" x2="3" y2="12" />
+                  <line x1="21" y1="12" x2="23" y2="12" />
+                  <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                  <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+                </svg>
+              ) : (
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+                </svg>
+              )}
+            </button>
+            <button className="sidebar-foot-signout" onClick={signOut}>
+              サインアウト
+            </button>
+          </div>
         </div>
       </div>
 
@@ -642,6 +748,28 @@ export default function Page() {
                   ) : (
                     ""
                   ))}
+                {m.role === "assistant" && m.content && speechSynthSupportedRef.current && (
+                  <button
+                    type="button"
+                    className={`speak-btn${speakingIndex === i ? " speaking" : ""}`}
+                    onClick={() => speak(m.content, i)}
+                    title={speakingIndex === i ? "読み上げを止める" : "読み上げる"}
+                    aria-label={speakingIndex === i ? "読み上げを止める" : "読み上げる"}
+                  >
+                    {speakingIndex === i ? (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="6" y="4" width="4" height="16" rx="1" />
+                        <rect x="14" y="4" width="4" height="16" rx="1" />
+                      </svg>
+                    ) : (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                        <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+                        <path d="M18.5 6a9 9 0 0 1 0 12" />
+                      </svg>
+                    )}
+                  </button>
+                )}
               </div>
             ))}
             <div ref={bottomRef} />
@@ -762,6 +890,23 @@ export default function Page() {
           </div>
         </div>
       </div>
+
+      {confirmDelete && (
+        <div className="modal-overlay" onClick={() => setConfirmDelete(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-title">この記録を削除しますか</div>
+            <div className="modal-body">「{confirmDelete.title}」を削除します。元には戻せません。</div>
+            <div className="modal-actions">
+              <button className="modal-btn-cancel" onClick={() => setConfirmDelete(null)}>
+                やめる
+              </button>
+              <button className="modal-btn-danger" onClick={confirmDeleteNow}>
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
