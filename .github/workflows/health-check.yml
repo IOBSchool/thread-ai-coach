@@ -1,0 +1,67 @@
+name: AIコーチ死活監視
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 毎日15:00 JST / 07:00頃 独時間
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 本番に実際にメッセージを投げて確認
+        id: check
+        run: |
+          set +e
+          RESP=$(curl -s -w "\n%{http_code}" --max-time 60 "https://thread-ai-coach-circle.vercel.app/api/health")
+          CODE=$(echo "$RESP" | tail -1)
+          BODY=$(echo "$RESP" | sed '$d')
+          echo "http=$CODE"
+          echo "$BODY"
+          echo "code=$CODE" >> "$GITHUB_OUTPUT"
+          echo "body<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+
+      - name: 落ちていたらIssueを立てる（会員より先に気づくため）
+        if: steps.check.outputs.code != '200'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `AIコーチの自動チェックが失敗しました。\n\n\`\`\`\n${{ steps.check.outputs.body }}\n\`\`\`\n\nhttps://thread-ai-coach-circle.vercel.app/api/health を直接開いて内容を確認してください。`;
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "coach-down",
+            });
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title: "🚨 AIコーチが応答していません",
+                body, labels: ["coach-down"],
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issues[0].number, body,
+              });
+            }
+
+      - name: 復旧していたら開いているIssueを閉じる
+        if: steps.check.outputs.code == '200'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "coach-down",
+            });
+            for (const issue of issues) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, body: "復旧を確認しました。自動でクローズします。",
+              });
+              await github.rest.issues.update({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: issue.number, state: "closed",
+              });
+            }
