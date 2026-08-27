@@ -387,6 +387,7 @@ input, textarea { font-family: inherit; }
   gap: 8px;
 }
 .composer-controls-left { display: flex; align-items: center; gap: 4px; }
+.composer-controls-right { display: flex; align-items: center; gap: 8px; }
 .icon-btn {
   width: 30px; height: 30px;
   display: flex; align-items: center; justify-content: center;
@@ -411,6 +412,19 @@ input, textarea { font-family: inherit; }
 }
 .mode-pill:hover { border-color: var(--accent); color: var(--ink); }
 .mode-pill-dot { width: 6px; height: 6px; border-radius: 50%; }
+
+.send-btn {
+  width: 30px; height: 30px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  transition: opacity 0.2s, transform 0.1s;
+}
+.send-btn:hover:not(:disabled) { opacity: 0.88; }
+.send-btn:active:not(:disabled) { transform: scale(0.94); }
+.send-btn:disabled { background: var(--line); color: var(--sub); cursor: not-allowed; }
 .mode-menu {
   position: absolute;
   bottom: calc(100% + 6px);

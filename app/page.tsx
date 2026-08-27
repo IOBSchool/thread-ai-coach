@@ -629,34 +629,49 @@ export default function Page() {
                   </button>
                 )}
               </div>
-              <div style={{ position: "relative" }}>
+              <div className="composer-controls-right">
+                <div style={{ position: "relative" }}>
+                  <button
+                    type="button"
+                    className="mode-pill"
+                    onClick={() => setModeMenuOpen((v) => !v)}
+                  >
+                    <span className="mode-pill-dot" style={{ background: MODE_INFO[mode].dot }} />
+                    {MODE_INFO[mode].label}
+                  </button>
+                  {modeMenuOpen && (
+                    <>
+                      <div
+                        style={{ position: "fixed", inset: 0, zIndex: 15 }}
+                        onClick={() => setModeMenuOpen(false)}
+                      />
+                      <div className="mode-menu">
+                        {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
+                          <button key={m} className="mode-menu-item" onClick={() => chooseMode(m)}>
+                            <div className="mode-menu-item-label">
+                              <span className="mode-pill-dot" style={{ background: MODE_INFO[m].dot }} />
+                              {MODE_INFO[m].label}
+                            </div>
+                            <div className="mode-menu-item-desc">{MODE_INFO[m].desc}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button
                   type="button"
-                  className="mode-pill"
-                  onClick={() => setModeMenuOpen((v) => !v)}
+                  className="send-btn"
+                  onClick={send}
+                  disabled={streaming || (!input.trim() && attachments.length === 0)}
+                  title="送る"
+                  aria-label="送る"
                 >
-                  <span className="mode-pill-dot" style={{ background: MODE_INFO[mode].dot }} />
-                  {MODE_INFO[mode].label}
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="6 11 12 5 18 11" />
+                  </svg>
                 </button>
-                {modeMenuOpen && (
-                  <>
-                    <div
-                      style={{ position: "fixed", inset: 0, zIndex: 15 }}
-                      onClick={() => setModeMenuOpen(false)}
-                    />
-                    <div className="mode-menu">
-                      {(Object.keys(MODE_INFO) as Mode[]).map((m) => (
-                        <button key={m} className="mode-menu-item" onClick={() => chooseMode(m)}>
-                          <div className="mode-menu-item-label">
-                            <span className="mode-pill-dot" style={{ background: MODE_INFO[m].dot }} />
-                            {MODE_INFO[m].label}
-                          </div>
-                          <div className="mode-menu-item-desc">{MODE_INFO[m].desc}</div>
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
               </div>
             </div>
           </div>
