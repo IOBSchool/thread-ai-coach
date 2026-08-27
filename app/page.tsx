@@ -13,7 +13,7 @@ type Session = {
   updated_at: string;
   messages: Msg[];
 };
-type Mode = "gentle" | "direct";
+type Mode = "gentle" | "neutral" | "direct";
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -50,7 +50,8 @@ function groupSessions(sessions: Session[]) {
 }
 
 const MODE_INFO: Record<Mode, { label: string; dot: string; desc: string }> = {
-  gentle: { label: "甘口", dot: "var(--rose)", desc: "そっと寄り添ってほしいとき" },
+  gentle: { label: "甘口", dot: "var(--rose)", desc: "やさしく包んでほしいとき" },
+  neutral: { label: "中立", dot: "var(--blue)", desc: "いつもの距離感で" },
   direct: { label: "辛口", dot: "var(--accent)", desc: "率直に映してほしいとき" },
 };
 
@@ -75,7 +76,7 @@ export default function Page() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachErr, setAttachErr] = useState("");
 
-  const [mode, setMode] = useState<Mode>("gentle");
+  const [mode, setMode] = useState<Mode>("neutral");
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
 
   const [recording, setRecording] = useState(false);
@@ -178,7 +179,7 @@ export default function Page() {
   // 甘口/辛口モードの記憶
   useEffect(() => {
     const saved = typeof window !== "undefined" ? localStorage.getItem("tapestry-coach-mode") : null;
-    if (saved === "gentle" || saved === "direct") setMode(saved);
+    if (saved === "gentle" || saved === "neutral" || saved === "direct") setMode(saved);
   }, []);
   const chooseMode = (m: Mode) => {
     setMode(m);
