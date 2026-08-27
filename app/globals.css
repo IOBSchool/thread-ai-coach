@@ -22,32 +22,32 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #1c1712;
-    --bg-soft: #241e17;
-    --ink: #ece3d5;
-    --sub: #a89987;
+    --bg: #14101f;
+    --bg-soft: #1d1730;
+    --ink: #ece6f5;
+    --sub: #a89bc4;
     --line: rgba(255, 255, 255, 0.09);
-    --card: #241e17;
+    --card: #1d1730;
     --accent: #dba05a;
     --accent-soft: rgba(219, 160, 90, 0.16);
-    --deep1: #0d0b14;
-    --deep2: #16111f;
+    --deep1: #0a0713;
+    --deep2: #130e22;
     --modal-overlay: rgba(0, 0, 0, 0.6);
     color-scheme: dark;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #1c1712;
-  --bg-soft: #241e17;
-  --ink: #ece3d5;
-  --sub: #a89987;
+  --bg: #14101f;
+  --bg-soft: #1d1730;
+  --ink: #ece6f5;
+  --sub: #a89bc4;
   --line: rgba(255, 255, 255, 0.09);
-  --card: #241e17;
+  --card: #1d1730;
   --accent: #dba05a;
   --accent-soft: rgba(219, 160, 90, 0.16);
-  --deep1: #0d0b14;
-  --deep2: #16111f;
+  --deep1: #0a0713;
+  --deep2: #130e22;
   --modal-overlay: rgba(0, 0, 0, 0.6);
   color-scheme: dark;
 }
@@ -371,21 +371,6 @@ input, textarea { font-family: inherit; }
   color: var(--ink);
 }
 .msg.ai { color: var(--ink); position: relative; z-index: 1; }
-.speak-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px; height: 22px;
-  margin-left: 8px;
-  vertical-align: -4px;
-  border-radius: 50%;
-  color: var(--sub);
-  opacity: 0;
-  transition: opacity 0.2s, background 0.2s, color 0.2s;
-}
-.msg.ai:hover .speak-btn { opacity: 0.6; }
-.speak-btn:hover { opacity: 1 !important; background: var(--bg-soft); color: var(--accent); }
-.speak-btn.speaking { opacity: 1; color: var(--accent); }
 .typing {
   display: inline-block;
   width: 7px; height: 7px;

@@ -74,8 +74,6 @@ export default function Page() {
   const [editingHeader, setEditingHeader] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null);
-  const [speakingIndex, setSpeakingIndex] = useState<number | null>(null);
-  const speechSynthSupportedRef = useRef(false);
 
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -200,26 +198,6 @@ export default function Page() {
       typeof window !== "undefined" &&
       (("SpeechRecognition" in window) || ("webkitSpeechRecognition" in window));
   }, []);
-
-  // 読み上げ対応チェック
-  useEffect(() => {
-    speechSynthSupportedRef.current = typeof window !== "undefined" && "speechSynthesis" in window;
-  }, []);
-
-  const speak = (text: string, idx: number) => {
-    if (!speechSynthSupportedRef.current) return;
-    window.speechSynthesis.cancel();
-    if (speakingIndex === idx) {
-      setSpeakingIndex(null);
-      return;
-    }
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "ja-JP";
-    u.onend = () => setSpeakingIndex(null);
-    u.onerror = () => setSpeakingIndex(null);
-    window.speechSynthesis.speak(u);
-    setSpeakingIndex(idx);
-  };
 
   // ダークモードの記憶（未設定ならOSの設定に従う）
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -748,28 +726,6 @@ export default function Page() {
                   ) : (
                     ""
                   ))}
-                {m.role === "assistant" && m.content && speechSynthSupportedRef.current && (
-                  <button
-                    type="button"
-                    className={`speak-btn${speakingIndex === i ? " speaking" : ""}`}
-                    onClick={() => speak(m.content, i)}
-                    title={speakingIndex === i ? "読み上げを止める" : "読み上げる"}
-                    aria-label={speakingIndex === i ? "読み上げを止める" : "読み上げる"}
-                  >
-                    {speakingIndex === i ? (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="6" y="4" width="4" height="16" rx="1" />
-                        <rect x="14" y="4" width="4" height="16" rx="1" />
-                      </svg>
-                    ) : (
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                        <path d="M15.5 8.5a5 5 0 0 1 0 7" />
-                        <path d="M18.5 6a9 9 0 0 1 0 12" />
-                      </svg>
-                    )}
-                  </button>
-                )}
               </div>
             ))}
             <div ref={bottomRef} />
